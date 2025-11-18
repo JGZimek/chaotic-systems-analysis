@@ -36,24 +36,34 @@ def estimate_delay_mi_kde(signal: np.ndarray, max_lag: int = 100) -> int:
     """Estimate time delay using MI (kernel density estimator - scipy.gaussian_kde)."""
     signal = np.asarray(signal).flatten()
     
+    if len(signal) > 2000:
+        step = len(signal) // 2000
+        signal = signal[::step]
+    
     mi_vals = []
-    for lag in range(1, max_lag + 1):
+    for lag in range(1, min(max_lag + 1, len(signal) // 2)):
         x = signal[:-lag]
         y = signal[lag:]
-        xy = np.column_stack([x, y])
         
-        kde_xy = gaussian_kde(xy.T)
-        kde_x = gaussian_kde(x)
-        kde_y = gaussian_kde(y)
-        
-        px_py = kde_x(x) * kde_y(y)
-        px_py[px_py < 1e-10] = 1e-10
-        
-        mi = np.mean(np.log(kde_xy(xy.T) / px_py))
-        mi_vals.append(mi)
+        try:
+            xy = np.column_stack([x, y])
+            
+            kde_xy = gaussian_kde(xy.T)
+            kde_x = gaussian_kde(x)
+            kde_y = gaussian_kde(y)
+            
+            px_py = kde_x(x) * kde_y(y)
+            px_py[px_py < 1e-10] = 1e-10
+            
+            mi = np.mean(np.log(kde_xy(xy.T) / px_py))
+            mi_vals.append(mi)
+        except:
+            mi_vals.append(np.inf)
+    
+    if len(mi_vals) == 0:
+        return 1
     
     return np.argmin(mi_vals) + 1
-
 
 def estimate_embedding_dim_corrint(
     signal: np.ndarray,

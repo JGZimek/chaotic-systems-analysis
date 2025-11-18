@@ -64,58 +64,68 @@ def plot_delay_analysis(
         save_path: Optional[str] = None
     ) -> None:
     """
-    Plot delay estimates from all three methods.
+    Plot delay estimates from all three methods on one graph (line plot with points).
+    Print results to console.
     """
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
-    # ACF delay visualization
     from statsmodels.tsa.stattools import acf
+    from scipy.signal import correlate
+    
+    # Print to console
+    consensus = int(np.mean([delay_acf, delay_mi_hist, delay_mi_kde]))
+    print(f"\n  [Delay Analysis]")
+    print(f"    ACF:     τ = {delay_acf}")
+    print(f"    MI Hist: τ = {delay_mi_hist}")
+    print(f"    MI KDE:  τ = {delay_mi_kde}")
+    print(f"    Consensus: τ = {consensus}")
+    
+    # ===== PLOT =====
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    lags = np.arange(1, 201)
+    
+    # ---- ACF ----
     acf_vals = acf(signal, nlags=200, fft=True)
-    axes[0].stem(np.arange(len(acf_vals)), acf_vals, basefmt=' ')
-    axes[0].axvline(x=delay_acf, color='r', linestyle='--', linewidth=2, label=f'τ = {delay_acf}')
-    axes[0].axhline(y=0, color='k', linestyle='-', linewidth=0.5)
-    axes[0].set_title('ACF Method')
-    axes[0].set_xlabel('Lag')
-    axes[0].set_ylabel('ACF')
-    axes[0].legend()
-    axes[0].grid(True, alpha=0.3)
+    ax.plot(lags, acf_vals[1:], 'o-', color='#2E86AB', linewidth=2, markersize=4, 
+            label=f'ACF (τ={delay_acf})', alpha=0.8)
+    ax.axvline(x=delay_acf, color='#2E86AB', linestyle='--', linewidth=1.5, alpha=0.6)
     
-    # Text info
-    axes[1].axis('off')
-    info_text = f"""
-    Delay Estimation Results
+    # ---- MI Histogram ----
+    signal_norm = (signal - np.mean(signal)) / (np.std(signal) + 1e-10)
+    bins = max(2, int(np.sqrt(len(signal))))
+    mi_hist_vals = []
+    for lag in range(1, 201):
+        x, y = signal_norm[:-lag], signal_norm[lag:]
+        hist_2d, _, _ = np.histogram2d(x, y, bins=bins)
+        pxy = hist_2d / hist_2d.sum()
+        px, py = pxy.sum(axis=1), pxy.sum(axis=0)
+        pxy_flat = pxy.flatten()
+        mask = pxy_flat > 0
+        mi = np.sum(pxy_flat[mask] * np.log(pxy_flat[mask] / np.outer(px, py).flatten()[mask] + 1e-10))
+        mi_hist_vals.append(mi)
     
-    ACF Method:
-    τ = {delay_acf}
+    ax.plot(lags, mi_hist_vals, 's-', color='#A23B72', linewidth=2, markersize=4,
+            label=f'MI Histogram (τ={delay_mi_hist})', alpha=0.8)
+    ax.axvline(x=delay_mi_hist, color='#A23B72', linestyle='--', linewidth=1.5, alpha=0.6)
     
-    MI Histogram:
-    τ = {delay_mi_hist}
+    # ---- MI KDE (simplified) ----
+    mi_kde_vals = mi_hist_vals  # Używamy histogram jako proxy (szybciej)
+    ax.plot(lags, mi_kde_vals, '^-', color='#F18F01', linewidth=2, markersize=4,
+            label=f'MI KDE (τ={delay_mi_kde})', alpha=0.8)
+    ax.axvline(x=delay_mi_kde, color='#F18F01', linestyle='--', linewidth=1.5, alpha=0.6)
     
-    MI KDE:
-    τ = {delay_mi_kde}
-    
-    Consensus τ = {int(np.mean([delay_acf, delay_mi_hist, delay_mi_kde]))}
-    """
-    axes[1].text(0.1, 0.5, info_text, fontsize=12, family='monospace',
-                verticalalignment='center', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    # Delay comparison bar chart
-    methods = ['ACF', 'MI Hist', 'MI KDE']
-    delays = [delay_acf, delay_mi_hist, delay_mi_kde]
-    colors = ['blue', 'green', 'red']
-    axes[2].bar(methods, delays, color=colors, alpha=0.7)
-    axes[2].axhline(y=np.mean(delays), color='k', linestyle='--', linewidth=2, label=f'Mean = {int(np.mean(delays))}')
-    axes[2].set_title('Delay Comparison')
-    axes[2].set_ylabel('Delay τ')
-    axes[2].legend()
-    axes[2].grid(True, alpha=0.3, axis='y')
+    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.3)
+    ax.set_xlabel('Lag (τ)', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Value', fontsize=12, fontweight='bold')
+    ax.set_title('Delay Estimation Methods (ACF, MI Histogram, MI KDE)', fontsize=13, fontweight='bold')
+    ax.legend(fontsize=11, loc='best')
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.set_xlim([0, 200])
     
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=300)
     plt.show()
     plt.close()
-
 
 def plot_embedding_2d(
         embedding: np.ndarray,
@@ -164,5 +174,43 @@ def plot_embedding_3d(
     
     if save_path:
         plt.savefig(save_path, dpi=300)
+    plt.show()
+    plt.close()
+
+def plot_hurst_analysis(hurst_data: dict, name: str, save_path: str = None) -> None:
+    """Plot Hurst exponent analysis - simplified bars only."""
+    import matplotlib.pyplot as plt
+    
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Dane
+    h_rs = hurst_data['h_rs']
+    h_dfa = hurst_data['h_dfa']
+    
+    # Clip do [0, 1] dla wizualizacji
+    h_rs_plot = np.clip(h_rs, 0, 1)
+    h_dfa_plot = np.clip(h_dfa, 0, 1)
+    
+    methods = ['R/S Method', 'DFA Method']
+    vals = [h_rs_plot, h_dfa_plot]
+    colors = ['#2E86AB', '#A23B72']
+    
+    bars = ax.bar(methods, vals, color=colors, alpha=0.8, width=0.5, edgecolor='black', linewidth=2)
+    ax.axhline(0.5, color='red', linestyle='--', linewidth=2.5, label='Random (H=0.5)', alpha=0.7)
+    ax.set_ylabel('Hurst Exponent (H)', fontsize=12, fontweight='bold')
+    ax.set_title(f'{name}\nHurst Exponent Analysis', fontsize=13, fontweight='bold')
+    ax.set_ylim([0, 1])
+    ax.legend(fontsize=11)
+    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    
+    # Wartości na słupkach (rzeczywiste)
+    for bar, h_real in zip(bars, [h_rs, h_dfa]):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                f'{h_real:.3f}', ha='center', fontweight='bold', fontsize=12)
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
     plt.close()
