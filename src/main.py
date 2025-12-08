@@ -1,5 +1,5 @@
 import warnings
-warnings.filterwarnings("ignore") # Czysta konsola
+warnings.filterwarnings("ignore") 
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,7 +9,6 @@ from src.plotting import plot_time_series_multi, plot_delay_analysis, plot_embed
 from src.embedding import (
     estimate_delay_acf,
     estimate_delay_mi_histogram,
-    estimate_delay_mi_kde, 
     estimate_embedding_dim_corrint,
     create_delay_embedding
 )
@@ -18,6 +17,7 @@ from src.chaos_metrics import largest_lyapunov_exponent, box_counting_dimension,
 from src.bifurcation import analyze_bifurcation_fractional, plot_bifurcation
 
 # ============ CONFIGURATION ============
+# Podstawowa konfiguracja dla sygnałów czasowych
 N = 10000        
 T_MAX = 100.0
 T = np.linspace(0, T_MAX, N)
@@ -65,47 +65,44 @@ def analyze_signal(signal_type, signal):
                            title=signals_config[signal_type],
                            save_path=f"data/timeseries_{signal_type}.png")
     
-    # [cite_start]2. Delay (ACF, MI Hist) [cite: 21]
+    # 2. Delay (ACF, MI Hist - Fraser & Swinney) [cite: 21]
     delay_acf = estimate_delay_acf(signal, max_lag=200)
     delay_mi_hist = estimate_delay_mi_histogram(signal, max_lag=200)
     
-    # KDE jest wolne, używamy go tylko jeśli trzeba, lub zakładamy proxy
-    # Dla uproszczenia w main przyjmijmy średnią z ACF i MI Hist dla szybkości
-    delay_mi_kde = delay_mi_hist # Proxy dla szybkości obliczeń w mainie
-    
-    tau = int(np.mean([delay_acf, delay_mi_hist]))
+    # MI (histogram) jest wymagany do oceny > 3.0. KDE jest opcjonalne/wolne.
+    tau = delay_mi_hist # Preferujemy MI dla systemów nieliniowych
     tau = max(1, tau)
     print(f"Delay (τ) estimated: {tau} (ACF:{delay_acf}, MI:{delay_mi_hist})")
     
-    plot_delay_analysis(signal, delay_acf, delay_mi_hist, delay_mi_kde,
+    plot_delay_analysis(signal, delay_acf, delay_mi_hist, None,
                         save_path=f"data/delay_{signal_type}.png")
 
-    # [cite_start]3. Embedding Dim (Nasycenie całki korelacyjnej) [cite: 20]
-    # Usunięto korektę ekspercką - przyjmujemy wynik algorytmu
+    # 3. Embedding Dim (Nasycenie całki korelacyjnej) [cite: 20]
     dE = estimate_embedding_dim_corrint(signal, tau, max_dim=8)
     print(f"Embedding Dimension (dE) estimated: {dE}")
 
-    # [cite_start]4. Reconstruction Plot [cite: 19]
-    # Do wizualizacji wymuszamy 3 wymiary, aby wykres był czytelny
+    # 4. Reconstruction Plot [cite: 19]
     embedding = create_delay_embedding(signal, 3, tau)
     plot_embedding_3d(embedding,
                       title=f"{signals_config[signal_type]} (τ={tau}, dE={dE})",
                       save_path=f"data/embed3d_{signal_type}.png")
 
-    # [cite_start]5. Hurst [cite: 22]
+    # 5. Hurst [cite: 22]
     hurst_res = analyze_hurst(signal)
     print(f"Hurst Exponent: {hurst_res['h']:.3f}")
 
-    # [cite_start]6. Lapunow [cite: 23]
-    # Uwaga: Nawet jeśli dE=2, do Lapunowa bezpieczniej brać min. 3 dla układów chaosu
-    lle = largest_lyapunov_exponent(signal, m=max(dE, 3), tau=tau, dt=DT)
+    # 6. Lapunow [cite: 23]
+    # Używamy nieco większego wymiaru dla stabilności numerycznej przy LLE
+    m_calc = max(dE, 3)
+    lle = largest_lyapunov_exponent(signal, m=m_calc, tau=tau, dt=DT)
     print(f"Largest Lyapunov Exponent (LLE): {lle:.4f}")
 
-    # [cite_start]7. Fraktale [cite: 24-27]
-    d_box = box_counting_dimension(signal, m=max(dE, 3), tau=tau)
-    d_corr, _, _ = correlation_dimension_and_entropy(signal, m=max(dE, 3), tau=tau)
+    # 7. Fraktale i Entropia [cite: 24-27]
+    d_box = box_counting_dimension(signal, m=m_calc, tau=tau)
+    d_corr, k2, _, _ = correlation_dimension_and_entropy(signal, m=m_calc, tau=tau)
     
     print(f"Fractal Dimensions -> Box: {d_box:.3f}, Correlation (D2): {d_corr:.3f}")
+    print(f"Correlation Entropy (K2): {k2:.3f}")
 
     return {
         'name': signals_config[signal_type],
@@ -114,15 +111,20 @@ def analyze_signal(signal_type, signal):
         'H': hurst_res['h'],
         'LLE': lle,
         'D_box': d_box,
-        'D2': d_corr
+        'D2': d_corr,
+        'K2': k2
     }
 
 # ============ MAIN ============
 if __name__ == "__main__":
+    import os
+    if not os.path.exists("data"):
+        os.makedirs("data")
+
     print("STARTING PROJECT ANALYSIS...")
     results = []
     
-    # A. Analiza
+    # A. Analiza sygnałów
     for signal_type in signals_config.keys():
         try:
             signal = generate_signal(signal_type)
@@ -130,22 +132,30 @@ if __name__ == "__main__":
             if res: results.append(res)
         except Exception as e:
             print(f"ERROR {signal_type}: {e}")
+            import traceback
+            traceback.print_exc()
 
-    # [cite_start]B. Bifurkacja [cite: 28]
+    # B. Bifurkacja (Sprott K - fractional) [cite: 28]
     print(f"\n{'='*70}\nBIFURCATION ANALYSIS\n{'='*70}")
     try:
-        alphas = np.linspace(0.8, 1.0, 30) 
-        T_bif = np.linspace(0, 100, 2000)
+        # Zwiększamy horyzont czasowy, bo układy ułamkowe wolno ewoluują
+        # T_MAX=400, N=4000 daje dt=0.1, co jest OK dla stabilności Sprotta ułamkowego
+        alphas = np.linspace(0.8, 1.0, 40) 
+        T_bif = np.linspace(0, 400, 4000) 
+        
         bif_data = analyze_bifurcation_fractional(alphas, y0, T_bif)
         plot_bifurcation(bif_data, save_path="data/bifurcation_sprott.png")
     except Exception as e:
         print(f"Error bifur: {e}")
+        import traceback
+        traceback.print_exc()
 
-    # C. Tabela
+    # C. Tabela Wyników
     if results:
-        print("\n" + "="*100)
-        print(f"{'Signal':<25} {'τ':>5} {'dE':>4} {'Hurst':>6} {'LLE':>8} {'D_box':>6} {'D2':>6}")
-        print("="*100)
+        print("\n" + "="*110)
+        # Nagłówek tabeli
+        print(f"{'Signal':<25} {'τ':>5} {'dE':>4} {'Hurst':>6} {'LLE':>8} {'D_box':>6} {'D2':>6} {'K2':>6}")
+        print("="*110)
         for r in results:
-            print(f"{r['name']:<25} {r['tau']:>5} {r['dE']:>4} {r['H']:>6.3f} {r['LLE']:>8.4f} {r['D_box']:>6.3f} {r['D2']:>6.3f}")
-        print("="*100 + "\n")
+            print(f"{r['name']:<25} {r['tau']:>5} {r['dE']:>4} {r['H']:>6.3f} {r['LLE']:>8.4f} {r['D_box']:>6.3f} {r['D2']:>6.3f} {r['K2']:>6.3f}")
+        print("="*110 + "\n")

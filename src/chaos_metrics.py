@@ -2,54 +2,148 @@ import numpy as np
 from scipy.spatial import cKDTree
 from sklearn.linear_model import LinearRegression
 
-def largest_lyapunov_exponent(data, m, tau, dt=0.01, k=5):
+def correlation_integral_curve(data, m, tau, r_vals, n_samples=1000):
     """
-    Estymacja największego wykładnika Lapunowa (LLE) metodą Rosensteina.
-    Wymagane przez: 
+    Pomocnicza funkcja licząca całkę korelacyjną C(r) dla zadanego wymiaru m.
+    Używa cKDTree dla wydajności.
     """
     N = len(data)
     M = N - (m - 1) * tau
     
-    # 1. Rekonstrukcja przestrzeni fazowej
+    # Tworzenie orbity (rekonstrukcja)
     orbit = np.array([data[i : i + (m * tau) : tau] for i in range(M)])
     
-    # 2. Znalezienie najbliższych sąsiadów
+    # Próbkowanie dla wydajności (przy dużych N obliczenia trwają O(N^2))
+    if len(orbit) > n_samples:
+        # Używamy stałego seeda dla powtarzalności próbkowania między wymiarami m i m+1
+        rng = np.random.default_rng(42)
+        idx = rng.choice(len(orbit), n_samples, replace=False)
+        orbit = orbit[idx]
+        M_actual = n_samples
+    else:
+        M_actual = len(orbit)
+
     tree = cKDTree(orbit)
-    dists, separate_idxs = tree.query(orbit, k=k+1) # k+1 bo najbliższy to punkt sam w sobie
+    C_r = []
     
-    # Wybieramy najbliższego sąsiada (który nie jest tym samym punktem)
+    # Liczymy liczbę par w odległości < r
+    for r in r_vals:
+        # count_neighbors zwraca liczbę par. Odejmujemy M_actual (pary punkt-sam-ze-sobą)
+        count = tree.count_neighbors(tree, r) - M_actual
+        # Normalizacja: liczba par to M*(M-1)
+        if M_actual > 1:
+            norm_count = count / (M_actual * (M_actual - 1))
+        else:
+            norm_count = 0
+        C_r.append(norm_count)
+        
+    return np.array(C_r)
+
+def correlation_dimension_and_entropy(data, m, tau, r_vals=None):
+    """
+    Estymacja wymiaru korelacyjnego (D2) oraz entropii korelacyjnej (K2).
+    Zgodnie z metodą Grassbergera-Procaccii.
+    
+    Returns:
+        D2 (float): Wymiar korelacyjny
+        K2 (float): Entropia korelacyjna (estymata KS entropy)
+        log_r (array): Oś X do wykresu
+        log_Cr (array): Oś Y do wykresu (dla wymiaru m)
+    """
+    # 1. Ustalenie zakresu promieni r, jeśli nie podano
+    if r_vals is None:
+        std_data = np.std(data)
+        # Zakres logarytmiczny od małego ułamka odchylenia do połowy rozpiętości
+        r_vals = np.logspace(np.log10(std_data * 0.05), np.log10(std_data * 2.0), 20)
+    
+    # 2. Obliczenie C(r) dla wymiaru m oraz m+1 (potrzebne do entropii)
+    C_m = correlation_integral_curve(data, m, tau, r_vals)
+    C_m1 = correlation_integral_curve(data, m+1, tau, r_vals)
+    
+    # Filtrowanie zer (logarytm)
+    valid = (C_m > 0) & (C_m1 > 0)
+    
+    if np.sum(valid) < 3:
+        return 0.0, 0.0, np.log(r_vals), np.zeros_like(r_vals)
+
+    log_r = np.log(r_vals[valid])
+    log_Cm = np.log(C_m[valid])
+    log_Cm1 = np.log(C_m1[valid])
+    
+    # 3. Obliczenie D2 (nachylenie log C_m vs log r)
+    # Fitujemy linię prostą do obszaru skalowania (całego dostępnego w tej prostej wersji)
+    reg = LinearRegression().fit(log_r.reshape(-1, 1), log_Cm)
+    D2 = reg.coef_[0]
+    
+    # 4. Obliczenie K2 (Entropia)
+    # Teoretycznie: K2 ~ (1 / tau) * ln( C_m(r) / C_{m+1}(r) )
+    # W skali logarytmicznej: K2 ~ (log(C_m) - log(C_{m+1})) / tau
+    # K2 bierzemy jako średnią wartość różnicy w obszarze skalowania
+    
+    differences = (log_Cm - log_Cm1)
+    # Dzielimy przez tau (zakładając tau jako jednostkę czasu próbkowania dt=1 w tym kontekście, 
+    # lub można użyć tau*dt jeśli chcemy jednostki fizyczne czasu). 
+    # W standardowych implementacjach często podaje się per iteracja/step:
+    K2_est = np.mean(differences) 
+    
+    # Aby wynik był nieujemny (numeryczne artefakty mogą dać ujemne wartości przy szumie)
+    K2 = max(0.0, K2_est)
+    
+    return D2, K2, log_r, log_Cm
+
+def largest_lyapunov_exponent(data, m, tau, dt=0.01, k=5):
+    """
+    Estymacja największego wykładnika Lapunowa (LLE) metodą Rosensteina.
+    """
+    N = len(data)
+    M = N - (m - 1) * tau
+    
+    # Rekonstrukcja
+    orbit = np.array([data[i : i + (m * tau) : tau] for i in range(M)])
+    
+    # Znalezienie najbliższych sąsiadów
+    tree = cKDTree(orbit)
+    # k+1 bo najbliższy to punkt sam w sobie
+    dists, separate_idxs = tree.query(orbit, k=k+1) 
+    
+    # Wybieramy najbliższego sąsiada (indeks 1, bo 0 to punkt własny)
     nearest_idxs = separate_idxs[:, 1] 
     
-    # 3. Śledzenie dywergencji w czasie
-    max_iter = min(50, M - 1) # Horyzont czasowy
+    # Śledzenie dywergencji
+    max_iter = min(50, M - 1) 
     divergence = []
     
     for i in range(max_iter):
         dist_sum = 0
         count = 0
-        for j in range(M - i):
+        # Próbkowanie co 10 punkt dla szybkości, jeśli orbita długa
+        step = 1 if M < 5000 else 10
+        
+        for j in range(0, M - i, step):
             idx_curr = j
             idx_neigh = nearest_idxs[j]
             
             if idx_neigh + i < M:
-                d = np.linalg.norm(orbit[idx_curr+i] - orbit[idx_neigh+i])
-                if d > 0:
+                v1 = orbit[idx_curr+i]
+                v2 = orbit[idx_neigh+i]
+                d = np.linalg.norm(v1 - v2)
+                if d > 1e-10: # Unikamy log(0)
                     dist_sum += np.log(d)
                     count += 1
         if count > 0:
             divergence.append(dist_sum / count)
             
-    # 4. Dopasowanie liniowe (nachylenie to LLE)
+    # Dopasowanie liniowe
     time_steps = np.arange(len(divergence)) * dt
-    if len(divergence) > 2:
+    if len(divergence) > 5:
+        # Fitujemy do liniowej części (pomijamy ewentualne stany początkowe/nasycenie)
         reg = LinearRegression().fit(time_steps.reshape(-1, 1), np.array(divergence))
         return reg.coef_[0]
     return 0.0
 
 def box_counting_dimension(data, m, tau, bins_range=(2, 50)):
     """
-    Obliczanie wymiaru pudełkowego (pojemnościowego).
-    Wymagane przez: 
+    Wymiar pudełkowy (Box-counting).
     """
     N = len(data)
     M = N - (m - 1) * tau
@@ -58,73 +152,23 @@ def box_counting_dimension(data, m, tau, bins_range=(2, 50)):
     counts = []
     sizes = []
     
-    # Normalizacja orbity do [0, 1] dla uproszczenia podziału
     orbit_min = orbit.min(axis=0)
     orbit_max = orbit.max(axis=0)
     orbit_norm = (orbit - orbit_min) / (orbit_max - orbit_min + 1e-10)
     
-    for bins in range(bins_range[0], bins_range[1], 2):
-        # Histogram n-wymiarowy
+    # Sprawdzamy kilka wielkości pudełek
+    # Używamy skali logarytmicznej dla bins, żeby punkty na wykresie były równomiernie rozłożone
+    bins_list = np.unique(np.logspace(np.log10(2), np.log10(bins_range[1]), 10).astype(int))
+    
+    for bins in bins_list:
         H, _ = np.histogramdd(orbit_norm, bins=bins)
-        # Liczba niepustych pudełek
         N_eps = np.sum(H > 0)
         
         if N_eps > 0:
             counts.append(np.log(N_eps))
-            sizes.append(np.log(bins)) # 1/epsilon proprocjonalne do bins
+            sizes.append(np.log(bins)) 
             
     if len(counts) > 2:
-        # Wymiar to nachylenie prostej log(N) vs log(1/eps)
         reg = LinearRegression().fit(np.array(sizes).reshape(-1, 1), np.array(counts))
         return reg.coef_[0]
     return 0.0
-
-def correlation_dimension_and_entropy(data, m, tau, r_vals=None):
-    """
-    Estymacja wymiaru korelacyjnego (D2) i entropii korelacyjnej (K2).
-    Wymagane przez: 
-    """
-    N = len(data)
-    M = N - (m - 1) * tau
-    orbit = np.array([data[i : i + (m * tau) : tau] for i in range(M)])
-    
-    # Próbkowanie dla wydajności (duże N liczy się bardzo długo)
-    if M > 1000:
-        idx = np.random.choice(M, 1000, replace=False)
-        orbit = orbit[idx]
-        M = 1000
-
-    tree = cKDTree(orbit)
-    
-    if r_vals is None:
-        # Heurystyka doboru promieni
-        dists = tree.query(orbit, k=2)[0][:, 1]
-        min_d = np.mean(dists)
-        max_d = np.max(np.linalg.norm(orbit - np.mean(orbit, axis=0), axis=1))
-        r_vals = np.logspace(np.log10(min_d), np.log10(max_d/2), 20)
-    
-    C_r = []
-    for r in r_vals:
-        # Liczba par punktów w odległości < r
-        count = tree.count_neighbors(tree, r) - M # odejmujemy autokorelację (punkt sam z sobą)
-        norm_count = count / (M * (M - 1))
-        C_r.append(norm_count)
-        
-    # Usunięcie zer dla logarytmu
-    C_r = np.array(C_r)
-    valid_idx = C_r > 0
-    log_C_r = np.log(C_r[valid_idx])
-    log_r = np.log(r_vals[valid_idx])
-    
-    # D2 - Wymiar korelacyjny (nachylenie w obszarze skalowania)
-    D2 = 0.0
-    if len(log_r) > 3:
-        reg = LinearRegression().fit(log_r.reshape(-1, 1), log_C_r)
-        D2 = reg.coef_[0]
-        
-    # K2 - Entropia korelacyjna (przybliżenie: K2 ~ 1/tau * ln(Cm(r)/Cm+1(r)))
-    # Tutaj uproszczona estymacja bazująca na D2
-    # W pełnym podejściu trzeba policzyć Cm i Cm+1. 
-    # Przyjmijmy prostszą metrykę dla projektu: asymptota z wykresu Cm.
-    
-    return D2, log_r, log_C_r
