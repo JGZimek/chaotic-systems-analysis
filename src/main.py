@@ -65,7 +65,7 @@ def analyze_signal(signal_type, signal):
                            title=signals_config[signal_type],
                            save_path=f"data/timeseries_{signal_type}.png")
     
-    # 2. Delay (ACF, MI Hist - Fraser & Swinney) [cite: 21]
+    # [cite_start]2. Delay (ACF, MI Hist - Fraser & Swinney) [cite: 21]
     delay_acf = estimate_delay_acf(signal, max_lag=200)
     delay_mi_hist = estimate_delay_mi_histogram(signal, max_lag=200)
     
@@ -77,27 +77,27 @@ def analyze_signal(signal_type, signal):
     plot_delay_analysis(signal, delay_acf, delay_mi_hist, None,
                         save_path=f"data/delay_{signal_type}.png")
 
-    # 3. Embedding Dim (Nasycenie całki korelacyjnej) [cite: 20]
+    # [cite_start]3. Embedding Dim (Nasycenie całki korelacyjnej) [cite: 20]
     dE = estimate_embedding_dim_corrint(signal, tau, max_dim=8)
     print(f"Embedding Dimension (dE) estimated: {dE}")
 
-    # 4. Reconstruction Plot [cite: 19]
+    # [cite_start]4. Reconstruction Plot [cite: 19]
     embedding = create_delay_embedding(signal, 3, tau)
     plot_embedding_3d(embedding,
                       title=f"{signals_config[signal_type]} (τ={tau}, dE={dE})",
                       save_path=f"data/embed3d_{signal_type}.png")
 
-    # 5. Hurst [cite: 22]
+    # [cite_start]5. Hurst [cite: 22]
     hurst_res = analyze_hurst(signal)
     print(f"Hurst Exponent: {hurst_res['h']:.3f}")
 
-    # 6. Lapunow [cite: 23]
+    # [cite_start]6. Lapunow [cite: 23]
     # Używamy nieco większego wymiaru dla stabilności numerycznej przy LLE
     m_calc = max(dE, 3)
     lle = largest_lyapunov_exponent(signal, m=m_calc, tau=tau, dt=DT)
     print(f"Largest Lyapunov Exponent (LLE): {lle:.4f}")
 
-    # 7. Fraktale i Entropia [cite: 24-27]
+    # [cite_start]7. Fraktale i Entropia [cite: 24-27]
     d_box = box_counting_dimension(signal, m=m_calc, tau=tau)
     d_corr, k2, _, _ = correlation_dimension_and_entropy(signal, m=m_calc, tau=tau)
     
@@ -135,13 +135,12 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
 
-    # B. Bifurkacja (Sprott K - fractional) [cite: 28]
+    # [cite_start]B. Bifurkacja (Sprott K - fractional) [cite: 28]
     print(f"\n{'='*70}\nBIFURCATION ANALYSIS\n{'='*70}")
     try:
-        # Zwiększamy horyzont czasowy, bo układy ułamkowe wolno ewoluują
-        # T_MAX=400, N=4000 daje dt=0.1, co jest OK dla stabilności Sprotta ułamkowego
+        # Zmieniono parametry: dt = 200/20000 = 0.01. Zapewnia to stabilność.
         alphas = np.linspace(0.8, 1.0, 40) 
-        T_bif = np.linspace(0, 400, 4000) 
+        T_bif = np.linspace(0, 200, 20000) 
         
         bif_data = analyze_bifurcation_fractional(alphas, y0, T_bif)
         plot_bifurcation(bif_data, save_path="data/bifurcation_sprott.png")
