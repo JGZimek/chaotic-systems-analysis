@@ -12,7 +12,7 @@ def lorenz_rhs(t: float, y: np.ndarray, sigma: float = 10.0, rho: float = 28.0, 
 def generate_lorenz(t_span, y0, t_eval, sigma=10.0, rho=28.0, beta=8/3):
     sol = solve_ivp(
         lambda t, y: lorenz_rhs(t, y, sigma, rho, beta),
-        t_span, y0, t_eval=t_eval, method='RK45', rtol=1e-8
+        t_span, y0, t_eval=t_eval, method='RK45', rtol=1e-8 # metoda Runge-Kutta RK45
     )
     return sol.y.T
 
@@ -26,11 +26,11 @@ def sprott_k_rhs(t: float, y: np.ndarray, a: float = 0.3) -> np.ndarray:
 def generate_sprott_k(t_span, y0, t_eval, a=0.3):
     sol = solve_ivp(
         lambda t, y: sprott_k_rhs(t, y, a),
-        t_span, y0, t_eval=t_eval, method='RK45', rtol=1e-8
+        t_span, y0, t_eval=t_eval, method='RK45', rtol=1e-8 # metoda Runge-Kutta RK45
     )
     return sol.y.T
 
-def caputo_fractional_ode_solver(alpha: float, rhs: Callable, y0: np.ndarray, t: np.ndarray, memory_length: int = 2000) -> np.ndarray:
+def gl_fractional_ode_solver(alpha: float, rhs: Callable, y0: np.ndarray, t: np.ndarray, memory_length: int = 2000) -> np.ndarray:
     """
     Rozwiązuje układ FDE metodą Grünwald-Letnikov.
     """

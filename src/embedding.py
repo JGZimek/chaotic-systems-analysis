@@ -12,23 +12,45 @@ def estimate_delay_acf(signal: np.ndarray, max_lag: int = 100) -> int:
     return max(1, max_lag // 4) 
 
 def estimate_delay_mi_histogram(signal: np.ndarray, max_lag: int = 100) -> int:
-    """Fraser-Swinney: Pierwsze minimum."""
+    """
+    Fraser-Swinney: Pierwsze minimum MI.
+    POPRAWKA: Zmniejszono liczbę binów dla stabilności.
+    """
     signal = np.asarray(signal).flatten()
-    bins = int(np.floor(np.sqrt(len(signal) / 5))) 
-    bins = max(5, min(bins, 100))
+    
+    # POPRAWKA: Zbyt duża liczba binów powoduje szum w estymacji MI i fałszywe minima.
+    # Dla N=10000, bins=44 daje ~5 pkt/bin 2D (duża wariancja).
+    # bins=16 daje ~40 pkt/bin 2D (lepsza statystyka).
+    bins = 16
+    
     mi_vals = []
     
     for lag in range(1, max_lag + 1):
-        x = signal[:-lag]; y = signal[lag:]
+        x = signal[:-lag]
+        y = signal[lag:]
+        
+        # Obliczenie histogramu 2D
         hist_2d, _, _ = np.histogram2d(x, y, bins=bins)
-        pxy = hist_2d / np.sum(hist_2d)
-        px = np.sum(pxy, axis=1); py = np.sum(pxy, axis=0)
+        
+        # Prawdopodobieństwa
+        total = np.sum(hist_2d)
+        pxy = hist_2d / total
+        px = np.sum(pxy, axis=1)
+        py = np.sum(pxy, axis=0)
+        
+        # Wzajemna informacja I(X;Y) = sum p(x,y) * log(p(x,y) / (p(x)p(y)))
         px_py = px[:, None] * py[None, :]
+        
+        # Unikamy log(0) i dzielenia przez 0
         nzs = pxy > 0
         mi = np.sum(pxy[nzs] * np.log(pxy[nzs] / px_py[nzs]))
         mi_vals.append(mi)
-        if len(mi_vals) > 2 and mi_vals[-2] < mi_vals[-3] and mi_vals[-2] < mi_vals[-1]:
-            return lag - 1 
+        
+        # Sprawdzamy warunek minimum lokalnego (z małym buforem na start)
+        if len(mi_vals) > 2:
+            if mi_vals[-2] < mi_vals[-3] and mi_vals[-2] < mi_vals[-1]:
+                return lag - 1 
+                
     return np.argmin(mi_vals) + 1
 
 def estimate_embedding_dim_corrint(signal: np.ndarray, delay: int, max_dim: int = 8, saturation_threshold: float = 0.1) -> int:
@@ -53,9 +75,10 @@ def estimate_embedding_dim_corrint(signal: np.ndarray, delay: int, max_dim: int 
         
         # 1. Nasycenie
         is_saturated = rel_change < saturation_threshold
-        # 2. Space Filling Check: Atraktor nie może wypełniać całej przestrzeni
-        fits_in_space = d2_curr < (m - 0.4)
-        
+        # 2. Space Filling Check - POPRAWIONE
+        # Wymuszamy, aby wymiar przestrzeni (m) był o pełną 0.8 większy od wymiaru fraktalnego D2.
+        fits_in_space = d2_curr < (m - 0.8)
+            
         if is_saturated and fits_in_space:
             return m
     return max_dim

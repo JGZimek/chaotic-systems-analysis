@@ -3,7 +3,7 @@ warnings.filterwarnings("ignore")
 
 import numpy as np
 import matplotlib.pyplot as plt
-from src.systems import generate_lorenz, generate_sprott_k, sprott_k_rhs, caputo_fractional_ode_solver
+from src.systems import generate_lorenz, generate_sprott_k, sprott_k_rhs, gl_fractional_ode_solver
 from src.signals import get_random_signal, get_periodic_signal
 from src.plotting import plot_time_series_multi, plot_delay_analysis, plot_embedding_3d
 from src.embedding import (
@@ -45,10 +45,10 @@ def generate_signal(signal_type):
         traj = generate_sprott_k((T[0], T[-1]), y0, T)
         return traj[:, 0]
     elif signal_type == 'sprott_k_frac_095':
-        traj = caputo_fractional_ode_solver(0.95, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T)
+        traj = gl_fractional_ode_solver(0.95, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T)
         return traj[:, 0]
     elif signal_type == 'sprott_k_frac_065':
-        traj = caputo_fractional_ode_solver(0.65, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T)
+        traj = gl_fractional_ode_solver(0.65, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T)
         return traj[:, 0]
 
 def analyze_signal(signal_type, signal):

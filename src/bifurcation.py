@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from src.systems import sprott_k_rhs, caputo_fractional_ode_solver
+from src.systems import sprott_k_rhs, gl_fractional_ode_solver
 
 def analyze_bifurcation_fractional(alphas, y0, T, system_rhs='sprott_k'):
     bifurcation_points = []
@@ -10,7 +10,7 @@ def analyze_bifurcation_fractional(alphas, y0, T, system_rhs='sprott_k'):
         try:
             if i % 10 == 0: print(f"  Processing alpha: {alpha:.3f}...")
             # Pamięć 1000 jest wystarczająca do wykrycia bifurkacji i szybka
-            traj = caputo_fractional_ode_solver(alpha, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T, memory_length=1000)
+            traj = gl_fractional_ode_solver(alpha, lambda t, y: sprott_k_rhs(t, y, a=0.3), y0, T, memory_length=1000)
             
             if np.any(np.isnan(traj)): continue
             
