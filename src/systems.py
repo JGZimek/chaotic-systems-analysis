@@ -1,7 +1,6 @@
 import numpy as np
-from typing import Callable
 from scipy.integrate import solve_ivp
-from scipy.special import gamma
+from typing import Callable
 
 def lorenz_rhs(t: float, y: np.ndarray, sigma: float = 10.0, rho: float = 28.0, beta: float = 8/3) -> np.ndarray:
     x, y_, z = y
@@ -31,35 +30,54 @@ def generate_sprott_k(t_span, y0, t_eval, a=0.3):
     )
     return sol.y.T
 
-def caputo_fractional_ode_solver(alpha: float, rhs: Callable, y0: np.ndarray, t: np.ndarray) -> np.ndarray:
+def caputo_fractional_ode_solver(alpha: float, rhs: Callable, y0: np.ndarray, t: np.ndarray, memory_length: int = 2000) -> np.ndarray:
     """
-    Solves a Caputo fractional ODE using the Grünwald-Letnikov approximation.
-    Includes numerical stability checks.
+    Rozwiązuje układ FDE metodą Grünwald-Letnikov.
     """
-    n, d = len(t), len(y0)
+    n = len(t)
+    d = len(y0)
     y = np.zeros((n, d))
     y[0] = y0
     
-    # Pre-compute gamma to save time
-    g_alpha = gamma(alpha + 1)
+    h = t[1] - t[0] # Krok czasowy
+    h_alpha = h ** alpha
+    
+    # === POPRAWKA ===
+    # Limit pamięci
+    limit_mem = min(n, memory_length)
+    
+    # Tablica wag musi mieć rozmiar limit_mem + 1, aby pomieścić indeksy od 0 do limit_mem.
+    # Wzór GL sumuje od j=1 do k. Jeśli k=2000, potrzebujemy w[2000].
+    w = np.zeros(limit_mem + 1) 
+    
+    w[0] = 1.0
+    for j in range(1, limit_mem + 1):
+        w[j] = (1 - (alpha + 1) / j) * w[j-1]
+    
+    print(f"  -> Fractional Solver (GL Method, alpha={alpha:.2f}, memory={limit_mem}) initialized.")
     
     for i in range(n - 1):
-        dt = t[i + 1] - t[i]
+        # 1. Określenie długości historii w tym kroku
+        # Nie może przekroczyć limit_mem
+        current_len = min(i + 1, limit_mem)
         
-        # Obliczenie pochodnej
-        k1 = rhs(t[i], y[i])
+        # 2. Pobranie historii stanów (odwrócona kolejność: y[i], y[i-1]...)
+        # shape: (current_len, d)
+        history = y[i+1-current_len : i+1][::-1] 
         
-        # Euler-like step for fractional calculus
-        step = (dt ** alpha) * k1 / g_alpha
-        y_next = y[i] + step
+        # 3. Pobranie odpowiednich wag
+        # Potrzebujemy wag w_1, w_2, ..., w_{current_len}
+        # shape: (current_len,)
+        weights = w[1 : current_len + 1]
         
-        # --- ZABEZPIECZENIE PRZED OVERFLOW ---
-        # Jeśli wartości uciekają do nieskończoności (> 1e6) lub są NaN, przerywamy lub zerujemy
-        if np.any(np.abs(y_next) > 1e6) or np.any(np.isnan(y_next)):
-            # Wypełniamy resztę tablicy NaN, żeby w main.py łatwo to wykryć
-            y[i+1:] = np.nan
-            break
-            
-        y[i + 1] = y_next
+        # 4. Obliczenie splotu (pamięci)
+        # np.dot obsłuży mnożenie wektora wag przez kolumny historii
+        memory_term = np.dot(weights, history)
         
+        # 5. Obliczenie funkcji i krok naprzód
+        f_val = rhs(t[i], y[i])
+        
+        # Schemat GL przesunięty: y_{n+1} = h^alpha * f(y_n) - sum(w_j * y_{n+1-j})
+        y[i+1] = h_alpha * f_val - memory_term
+
     return y

@@ -60,44 +60,40 @@ def analyze_signal(signal_type, signal):
         print("ERROR: Signal contains NaN values.")
         return None
 
-    # 1. Wizualizacja
     plot_time_series_multi(signals=[signal], t=T, labels=["Signal"],
                            title=signals_config[signal_type],
                            save_path=f"data/timeseries_{signal_type}.png")
     
-    # [cite_start]2. Delay (ACF, MI Hist - Fraser & Swinney) [cite: 21]
+    # 1. Opóźnienie (W8: MI vs ACF)
     delay_acf = estimate_delay_acf(signal, max_lag=200)
     delay_mi_hist = estimate_delay_mi_histogram(signal, max_lag=200)
     
-    # MI (histogram) jest wymagany do oceny > 3.0. KDE jest opcjonalne/wolne.
-    tau = delay_mi_hist # Preferujemy MI dla systemów nieliniowych
+    # Używamy MI jako metody głównej dla nieliniowości
+    tau = delay_mi_hist 
     tau = max(1, tau)
     print(f"Delay (τ) estimated: {tau} (ACF:{delay_acf}, MI:{delay_mi_hist})")
     
     plot_delay_analysis(signal, delay_acf, delay_mi_hist, None,
                         save_path=f"data/delay_{signal_type}.png")
 
-    # [cite_start]3. Embedding Dim (Nasycenie całki korelacyjnej) [cite: 20]
+    # 2. Wymiar zanurzenia (W7: Nasycenie)
     dE = estimate_embedding_dim_corrint(signal, tau, max_dim=8)
     print(f"Embedding Dimension (dE) estimated: {dE}")
 
-    # [cite_start]4. Reconstruction Plot [cite: 19]
+    # 3. Wizualizacja atraktora
     embedding = create_delay_embedding(signal, 3, tau)
     plot_embedding_3d(embedding,
                       title=f"{signals_config[signal_type]} (τ={tau}, dE={dE})",
                       save_path=f"data/embed3d_{signal_type}.png")
 
-    # [cite_start]5. Hurst [cite: 22]
+    # 4. Niezmienniki (W5, W6, W7)
     hurst_res = analyze_hurst(signal)
     print(f"Hurst Exponent: {hurst_res['h']:.3f}")
 
-    # [cite_start]6. Lapunow [cite: 23]
-    # Używamy nieco większego wymiaru dla stabilności numerycznej przy LLE
     m_calc = max(dE, 3)
     lle = largest_lyapunov_exponent(signal, m=m_calc, tau=tau, dt=DT)
     print(f"Largest Lyapunov Exponent (LLE): {lle:.4f}")
 
-    # [cite_start]7. Fraktale i Entropia [cite: 24-27]
     d_box = box_counting_dimension(signal, m=m_calc, tau=tau)
     d_corr, k2, _, _ = correlation_dimension_and_entropy(signal, m=m_calc, tau=tau)
     
@@ -115,7 +111,6 @@ def analyze_signal(signal_type, signal):
         'K2': k2
     }
 
-# ============ MAIN ============
 if __name__ == "__main__":
     import os
     if not os.path.exists("data"):
@@ -124,7 +119,6 @@ if __name__ == "__main__":
     print("STARTING PROJECT ANALYSIS...")
     results = []
     
-    # A. Analiza sygnałów
     for signal_type in signals_config.keys():
         try:
             signal = generate_signal(signal_type)
@@ -135,10 +129,11 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
 
-    # [cite_start]B. Bifurkacja (Sprott K - fractional) [cite: 28]
+    # B. Bifurkacja
     print(f"\n{'='*70}\nBIFURCATION ANALYSIS\n{'='*70}")
     try:
-        # Zmieniono parametry: dt = 200/20000 = 0.01. Zapewnia to stabilność.
+        # Zwiększamy liczbę punktów, aby dt było małe (stabilność numeryczna FDE)
+        # dt = 200 / 20000 = 0.01
         alphas = np.linspace(0.8, 1.0, 40) 
         T_bif = np.linspace(0, 200, 20000) 
         
@@ -149,10 +144,8 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
 
-    # C. Tabela Wyników
     if results:
         print("\n" + "="*110)
-        # Nagłówek tabeli
         print(f"{'Signal':<25} {'τ':>5} {'dE':>4} {'Hurst':>6} {'LLE':>8} {'D_box':>6} {'D2':>6} {'K2':>6}")
         print("="*110)
         for r in results:
