@@ -1,5 +1,6 @@
 import numpy as np
 from nolds import hurst_rs
+import matplotlib.pyplot as plt
 
 # ==========================================
 # ANALIZA WYKŁADNIKA HURSTA (Metoda R/S)
@@ -74,3 +75,61 @@ def analyze_hurst(signal: np.ndarray) -> dict:
     
     # 2. Zwrócenie wyniku wraz z interpretacją słowną
     return {'h': h_val, 'trend': classify_hurst(h_val)}
+
+def plot_hurst_rs(signal: np.ndarray, title: str = "Hurst R/S Analysis", save_path: str = None):
+    """
+    Rysuje wykres log-log analizy R/S (Rescaled Range) dla wyznaczenia wykładnika Hursta.
+    
+    Co pokazuje wykres:
+        - Oś X: logarytm długości podokna (n).
+        - Oś Y: logarytm średniej wartości statystyki R/S.
+        - Punkty: wyniki pomiarów dla różnych długości okien.
+        - Linia przerywana: dopasowanie liniowe. Nachylenie tej linii to Wykładnik Hursta (H).
+    """
+    signal = np.asarray(signal).flatten()
+    if len(signal) < 100:
+        print("Signal too short for Hurst plot.")
+        return
+
+    try:
+        # Wywołanie nolds z flagą debug_data=True aby otrzymać punkty wykresu.
+        # Zwraca krotkę: (H, (n_vals, rs_vals, ...))
+        h_val, data = hurst_rs(signal, debug_data=True)
+        
+        # === POPRAWKA ===
+        # Zamiast 'n_vals, rs_vals = data' (co powoduje błąd), bierzemy indeksy.
+        n_vals = data[0]
+        rs_vals = data[1]
+        
+        # Konwersja na skalę logarytmiczną (dla wykresu log-log)
+        log_n = np.log10(n_vals)
+        log_rs = np.log10(rs_vals)
+        
+        # Ponowne dopasowanie prostej y = ax + b dla celów wizualizacji
+        # (nachylenie 'poly[0]' powinno być identyczne jak 'h_val')
+        poly = np.polyfit(log_n, log_rs, 1)
+        fit_fn = np.poly1d(poly)
+        
+        # Rysowanie wykresu
+        plt.figure(figsize=(8, 6))
+        
+        # 1. Punkty pomiarowe
+        plt.scatter(log_n, log_rs, c='blue', alpha=0.6, label='R/S Data Points')
+        
+        # 2. Linia regresji
+        plt.plot(log_n, fit_fn(log_n), 'r--', linewidth=2, label=f'Fit (H={h_val:.3f})')
+        
+        plt.title(title)
+        plt.xlabel("log10(n) [Window Size]")
+        plt.ylabel("log10(R/S) [Rescaled Range]")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            # print(f"Hurst plot saved to {save_path}")
+        
+        plt.close()
+        
+    except Exception as e:
+        print(f"Could not plot Hurst R/S: {e}")
