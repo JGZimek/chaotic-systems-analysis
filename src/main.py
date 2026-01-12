@@ -8,12 +8,13 @@ import os
 # Importy z modułów projektu
 from src.systems import generate_lorenz, generate_sprott_k, sprott_k_rhs, gl_fractional_ode_solver
 from src.signals import get_random_signal, get_periodic_signal
-from src.plotting import plot_time_series_multi, plot_delay_analysis, plot_embedding_3d
+from src.plotting import plot_time_series_multi, plot_embedding_3d # Removed plot_delay_analysis from here
 from src.embedding import (
     estimate_delay_acf,
     estimate_delay_mi_histogram,
     estimate_embedding_dim_corrint,
-    create_delay_embedding
+    create_delay_embedding,
+    plot_paper_style_analysis # ADDED THIS IMPORT
 )
 from src.hurst_analysis import analyze_hurst, plot_hurst_rs
 from src.chaos_metrics import largest_lyapunov_exponent, box_counting_dimension, correlation_dimension_and_entropy
@@ -79,16 +80,21 @@ def analyze_signal(signal_type, signal):
                            save_path=f"data/timeseries_{signal_type}.png")
     
     # 2. Estymacja opóźnienia (Tau)
+    # Obliczamy tau z ACF dla informacji (do printa)
     delay_acf = estimate_delay_acf(signal, max_lag=200)
-    delay_mi_hist = estimate_delay_mi_histogram(signal, max_lag=200)
     
-    # Dla układów nieliniowych preferujemy Wzajemną Informację (MI)
-    tau = delay_mi_hist 
+    # Używamy nowej funkcji do wizualizacji i obliczenia tau z MI
+    # Zwraca ona tau obliczone metodą MI (Fraser-Swinney lub 4/5)
+    tau = plot_paper_style_analysis(signal, system_name=label, max_lag=200, 
+                                    save_path=f"data/delay_{signal_type}.png")
+    
+    # Zabezpieczenie minimalnego tau
     tau = max(1, tau)
-    print(f"Delay (τ) estimated: {tau} (ACF:{delay_acf}, MI:{delay_mi_hist})")
     
-    plot_delay_analysis(signal, delay_acf, delay_mi_hist, None,
-                        save_path=f"data/delay_{signal_type}.png")
+    # Możemy też wywołać starą funkcję wrapper, jeśli chcemy tylko wartość do logów,
+    # ale plot_paper_style_analysis już to zrobiła.
+    # Dla spójności logów:
+    print(f"Delay (τ) estimated: {tau} (ACF:{delay_acf}, MI:{tau})")
 
     # 3. Estymacja wymiaru zanurzenia (dE) - Metoda nasycenia
     dE = estimate_embedding_dim_corrint(signal, tau, max_dim=8)
@@ -104,7 +110,7 @@ def analyze_signal(signal_type, signal):
     hurst_res = analyze_hurst(signal)
     print(f"Hurst Exponent: {hurst_res['h']:.3f}")
     
-    # --- NOWE: Rysowanie wykresu R/S dla Hursta ---
+    # Rysowanie wykresu R/S dla Hursta
     plot_hurst_rs(signal, title=f"Hurst Analysis: {label}", 
                   save_path=f"data/hurst_{signal_type}.png")
 
